@@ -1799,6 +1799,10 @@ struct ssl_st {
      */
     const struct sigalg_lookup_st **shared_sigalgs;
     size_t shared_sigalgslen;
+
+
+    unsigned char *custom_ext17516;
+    size_t custom_ext17516_len;
 };
 
 /*

@@ -3365,6 +3365,9 @@ void ssl3_free(SSL *s)
     OPENSSL_free(s->s3.alpn_selected);
     OPENSSL_free(s->s3.alpn_proposed);
 
+    OPENSSL_free(s->custom_ext17516);
+    OPENSSL_free(s->custom_ext17516_len);
+
 #ifndef OPENSSL_NO_PSK
     OPENSSL_free(s->s3.tmp.psk);
 #endif

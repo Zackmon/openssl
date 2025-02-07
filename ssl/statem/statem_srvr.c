@@ -1565,6 +1565,11 @@ MSG_PROCESS_RETURN tls_process_client_hello(SSL *s, PACKET *pkt)
     }
 
     /* Preserve the raw extensions PACKET for later use */
+    PACKET newExtensionPacket;
+    s->custom_ext17516 = NULL;
+    s->custom_ext17516_len = 0;
+    process_custom_extension(&clienthello->extensions,&s->custom_ext17516,&s->custom_ext17516_len,&newExtensionPacket);
+    clienthello->extensions = newExtensionPacket;
     extensions = clienthello->extensions;
     if (!tls_collect_extensions(s, &extensions, SSL_EXT_CLIENT_HELLO,
                                 &clienthello->pre_proc_exts,
@@ -1583,6 +1588,77 @@ MSG_PROCESS_RETURN tls_process_client_hello(SSL *s, PACKET *pkt)
 
     return MSG_PROCESS_ERROR;
 }
+
+int process_custom_extension(PACKET *extensions,
+                             unsigned char **custom_ext_data, size_t *custom_ext_len,
+                             PACKET *new_exts)
+{
+    size_t start = PACKET_remaining(extensions);
+    /* Allocate a temporary memory buffer to rebuild the extension list. */
+    unsigned char *buf = OPENSSL_malloc(start);
+    if (buf == NULL)
+        return 0;
+    unsigned char *p = buf;
+    size_t new_len = 0;
+
+    while (PACKET_remaining(extensions) > 0) {
+        unsigned int ext_type;
+        PACKET ext_pkt;
+        size_t ext_len;
+
+        /* Each extension is encoded as:
+         *    uint16_t extension_type;
+         *    uint16_t extension_data_length;
+         *    uint8_t  extension_data[extension_data_length];
+         */
+        if (!PACKET_get_net_2(extensions, &ext_type))
+            goto err;
+        if (!PACKET_get_length_prefixed_2(extensions, &ext_pkt))
+            goto err;
+        ext_len = PACKET_remaining(&ext_pkt);
+
+        if (ext_type == 17516) {
+            /* Found the custom extension.
+             * Allocate and copy its data for later use.
+             */
+            *custom_ext_data = OPENSSL_malloc(ext_len);
+            if (*custom_ext_data == NULL)
+                goto err;
+            if (!PACKET_copy_bytes(&ext_pkt, *custom_ext_data, ext_len))
+                goto err;
+            *custom_ext_len = ext_len;
+            /* Skip adding this extension to the new extension list. */
+        } else {
+            /* Write out this extension unchanged into the new buffer.
+             * First, write the extension type and length.
+             */
+            p[0] = (unsigned char)(ext_type >> 8);
+            p[1] = (unsigned char)(ext_type & 0xff);
+            p[2] = (unsigned char)(ext_len >> 8);
+            p[3] = (unsigned char)(ext_len & 0xff);
+            p += 4;
+            new_len += 4;
+            /* Then copy the extension data. */
+            if (ext_len > 0) {
+                if (!PACKET_copy_bytes(&ext_pkt, p, ext_len))
+                    goto err;
+                p += ext_len;
+                new_len += ext_len;
+            }
+        }
+    }
+    /* Set the new extensions PACKET. */
+    if (!PACKET_buf_init(new_exts, buf, new_len))
+        goto err;
+    /* Note: buf will be owned by new_exts after PACKET_buf_init() if it succeeds. */
+    return 1;
+
+ err:
+    OPENSSL_free(buf);
+    return 0;
+}
+
+
 
 static int tls_early_post_process_client_hello(SSL *s)
 {
