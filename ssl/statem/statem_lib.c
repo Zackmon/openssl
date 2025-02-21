@@ -1395,12 +1395,13 @@ int process_client_hello(SSL *s) {
     while (ext_pos + 4 <= exts_len) {
         uint16_t ext_type = (exts[ext_pos] << 8) | exts[ext_pos + 1];
         uint16_t ext_data_len = (exts[ext_pos + 2] << 8) | exts[ext_pos + 3];
-
+        printf("Found the extension %d\n", ext_type);
         /* Ensure the extension fits within the current extensions list */
         if (ext_pos + 4 + ext_data_len > exts_len)
             break;  /* Malformed extension: exit the loop */
 
         if (ext_type == 17516) {
+            printf("trying to remove 17516");
             size_t removal_len = 4 + ext_data_len;
             /* Remove this extension by shifting subsequent bytes left */
             memmove(exts + ext_pos,
