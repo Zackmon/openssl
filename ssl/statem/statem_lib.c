@@ -1271,6 +1271,195 @@ int tls_get_message_header(SSL *s, int *mt)
     return 1;
 }
 
+/*
+ * process_client_hello:
+ *   - Reads the original ClientHello from s->init_buf.
+ *   - Copies it into a separate buffer.
+ *   - Removes any extension with type 17516.
+ *   - Updates the handshake message length and extension length fields.
+ *   - Replaces s->init_buf with the new modified buffer.
+ *
+ * Returns 1 on success and 0 on error.
+ */
+int process_client_hello(SSL *s) {
+    BUF_MEM *init_buf = s->init_buf;
+    if (init_buf == NULL || init_buf->data == NULL || init_buf->length < 4) {
+        /* Not enough data to process a handshake header */
+        return 0;
+    }
+
+    size_t orig_len = init_buf->length;
+    char *orig_data = init_buf->data;
+
+    /* Allocate a new buffer that is as big as the original.
+       (The modified message will be smaller if we remove an extension.) */
+        char *new_data = OPENSSL_malloc(init_buf->max);
+    if (new_data == NULL) {
+        /* Allocation error */
+        return 0;
+    }
+    memcpy(new_data, orig_data, orig_len);
+
+    /*
+     * STEP 1. Parse the handshake header.
+     * The handshake header is 4 bytes:
+     *   - 1 byte message type
+     *   - 3 bytes message length
+     */
+    printf("hex dump of the new data\n");
+    //BIO_dump_fp(stdout, new_data, orig_len);
+    uint8_t handshake_type = new_data[0];
+    size_t client_hello_len = ((size_t)new_data[1] << 16) |
+                              ((size_t)new_data[2] << 8)  |
+                              ((size_t)new_data[3]);
+    if (client_hello_len + 4 > orig_len) {
+        OPENSSL_free(new_data);
+        return 0;
+    }
+
+    /*
+     * STEP 2. Locate the extensions in the ClientHello.
+     *
+     * For demonstration, we assume the ClientHello is structured as follows:
+     *
+     *  [ Handshake header (4 bytes) ]
+     *  [ Protocol version (2 bytes) ]
+     *  [ Random (32 bytes) ]
+     *  [ Session ID length (1 byte) + Session ID (variable) ]
+     *  [ Cipher suites length (2 bytes) + Cipher suites (variable) ]
+     *  [ Compression methods length (1 byte) + Compression methods (variable) ]
+     *  [ Extensions length (2 bytes) + Extensions (variable) ]
+     *
+     * In production code, you must robustly parse each field.
+     */
+    size_t pos = 4;  /* start after handshake header */
+
+    /* Skip protocol version (2 bytes) */
+    pos += 2;
+
+    /* Skip random (32 bytes) */
+    pos += 32;
+
+    /* Session ID */
+    if (pos >= orig_len) {
+        OPENSSL_free(new_data);
+        return 0;
+    }
+    uint8_t session_id_len = new_data[pos];
+    pos += 1 + session_id_len;
+
+    /* Cipher suites */
+    if (pos + 2 > orig_len) {
+        OPENSSL_free(new_data);
+        return 0;
+    }
+    uint16_t cipher_suites_len = (new_data[pos] << 8) | new_data[pos + 1];
+    pos += 2 + cipher_suites_len;
+
+    /* Compression methods */
+    if (pos >= orig_len) {
+        OPENSSL_free(new_data);
+        return 0;
+    }
+    uint8_t comp_methods_len = new_data[pos];
+    pos += 1 + comp_methods_len;
+
+    /* At this point, pos should point to the extensions length field.
+       Verify that there are at least 2 bytes for the extensions length.
+    */
+    if (pos + 2 > orig_len) {
+        /* No extensions present; nothing to remove */
+        OPENSSL_free(new_data);
+        return 1;
+    }
+    uint16_t exts_total_len = (new_data[pos] << 8) | new_data[pos + 1];
+    pos += 2;
+    if (pos + exts_total_len > orig_len) {
+        OPENSSL_free(new_data);
+        return 0;
+    }
+
+    /* Pointer to the start of the extensions list */
+     char *exts = new_data + pos;
+    size_t exts_len = exts_total_len;
+
+    /*
+     * STEP 3. Scan through the extensions and remove any with type 17516.
+     * Each extension is encoded as:
+     *    uint16_t extension_type;
+     *    uint16_t extension_length;
+     *    uint8_t  extension_data[extension_length];
+     */
+    size_t removed_total = 0;
+    size_t ext_pos = 0;
+    while (ext_pos + 4 <= exts_len) {
+        uint16_t ext_type = (exts[ext_pos] << 8) | exts[ext_pos + 1];
+        uint16_t ext_data_len = (exts[ext_pos + 2] << 8) | exts[ext_pos + 3];
+
+        /* Ensure the extension fits within the current extensions list */
+        if (ext_pos + 4 + ext_data_len > exts_len)
+            break;  /* Malformed extension: exit the loop */
+
+        if (ext_type == 17516) {
+            size_t removal_len = 4 + ext_data_len;
+            /* Remove this extension by shifting subsequent bytes left */
+            memmove(exts + ext_pos,
+                    exts + ext_pos + removal_len,
+                    exts_len - (ext_pos + removal_len));
+            exts_len -= removal_len;
+            removed_total += removal_len;
+            /* Do not advance ext_pos in case another extension is now at this offset */
+        } else {
+            ext_pos += 4 + ext_data_len;
+        }
+    }
+
+    /*
+     * STEP 4. Update the extensions length field.
+     * The extensions length field is located 2 bytes before the start of the extension list.
+     */
+    uint16_t new_exts_total_len = exts_len;
+    new_data[pos - 2] = (new_exts_total_len >> 8) & 0xff;
+    new_data[pos - 1] = new_exts_total_len & 0xff;
+
+    /*
+     * STEP 5. Update the ClientHello handshake message length.
+     * The handshake length (3 bytes) is in the handshake header (bytes 1-3).
+     */
+    if (client_hello_len < removed_total) {
+        OPENSSL_free(new_data);
+        return 0;
+    }
+    client_hello_len -= removed_total;
+    new_data[1] = (client_hello_len >> 16) & 0xff;
+    new_data[2] = (client_hello_len >> 8) & 0xff;
+    new_data[3] = client_hello_len & 0xff;
+
+    /*
+     * STEP 6. (Optional) Update the TLS record header if the record header is stored
+     * together with the handshake message. Typically, the TLS record header is 5 bytes:
+     *   - 1 byte content type
+     *   - 2 bytes version
+     *   - 2 bytes record length
+     * You would subtract 'removed_total' from the record length.
+     *
+     * This example assumes that the record header is managed elsewhere.
+     */
+
+    /*
+     * STEP 7. Replace the contents of s->init_buf with the new modified data.
+     * Here we free the original data and assign our new buffer to s->init_buf->data.
+     * Also update the length (and optionally the max size).
+     */
+    OPENSSL_free(s->init_buf->data);
+    s->init_buf->data = (char *)new_data;
+    s->init_buf->length = orig_len - removed_total;
+    s->init_buf->max = init_buf->max;//orig_len - removed_total; /* Adjust if necessary */
+
+    return 1;  /* Success */
+}
+
+
 int tls_get_message_body(SSL *s, size_t *len)
 {
     size_t n, readbytes;
@@ -1282,6 +1471,9 @@ int tls_get_message_body(SSL *s, size_t *len)
         *len = (unsigned long)s->init_num;
         return 1;
     }
+
+    //TODO modify the message here
+
 
     p = s->init_msg;
     n = s->s3.tmp.message_size - s->init_num;
@@ -1296,6 +1488,19 @@ int tls_get_message_body(SSL *s, size_t *len)
         s->init_num += readbytes;
         n -= readbytes;
     }
+
+    const char *handshake_state = SSL_state_string(s);
+    if (SSL_get_state(s) ==  TLS_ST_SR_CLNT_HELLO) {
+        printf("hex dump before modification \n");
+        BIO_dump_fp(stdout, s->init_buf->data, s->init_buf->length);
+
+        process_client_hello(s);
+
+        printf("hex dump after modification \n");
+        BIO_dump_fp(stdout, s->init_buf->data, s->init_buf->length);
+
+    }
+
 
     /*
      * If receiving Finished, record MAC of prior handshake messages for

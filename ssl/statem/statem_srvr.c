@@ -1372,13 +1372,26 @@ static void ssl_check_for_safari(SSL *s, const CLIENTHELLO_MSG *hello)
     ((options & SSL_OP_NO_RENEGOTIATION) == 0 \
      && (options & SSL_OP_ALLOW_CLIENT_RENEGOTIATION) != 0)
 
+
+
+
+
+
+
+
+
+
+
+
 MSG_PROCESS_RETURN tls_process_client_hello(SSL *s, PACKET *pkt)
 {
+    //process_client_hello(s);
     /* |cookie| will only be initialized for DTLS. */
     PACKET session_id, compression, extensions, cookie;
     static const unsigned char null_compression = 0;
     CLIENTHELLO_MSG *clienthello = NULL;
-
+    //printf("hex dump of the original request\n");
+    //BIO_dump_fp(stdout, PACKET_data(pkt), PACKET_remaining(pkt));
     /* Check if this is actually an unexpected renegotiation ClientHello */
     if (s->renegotiate == 0 && !SSL_IS_FIRST_HANDSHAKE(s)) {
         if (!ossl_assert(!SSL_IS_TLS13(s))) {
@@ -1565,11 +1578,13 @@ MSG_PROCESS_RETURN tls_process_client_hello(SSL *s, PACKET *pkt)
     }
 
     /* Preserve the raw extensions PACKET for later use */
-    PACKET newExtensionPacket;
+    //PACKET newExtensionPacket;
     s->custom_ext17516 = NULL;
     s->custom_ext17516_len = 0;
-    process_custom_extension(&clienthello->extensions,&s->custom_ext17516,&s->custom_ext17516_len,&newExtensionPacket);
-    clienthello->extensions = newExtensionPacket;
+    //process_custom_extension(&clienthello->extensions,&s->custom_ext17516,&s->custom_ext17516_len,&newExtensionPacket);
+    //printf("hex dump of newExtensionPacket\n");
+    //BIO_dump_fp(stdout, PACKET_data(&newExtensionPacket), PACKET_remaining(&newExtensionPacket));
+    //clienthello->extensions = newExtensionPacket;
     extensions = clienthello->extensions;
     if (!tls_collect_extensions(s, &extensions, SSL_EXT_CLIENT_HELLO,
                                 &clienthello->pre_proc_exts,
