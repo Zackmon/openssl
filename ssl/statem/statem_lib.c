@@ -1496,7 +1496,7 @@ int tls_get_message_body(SSL *s, size_t *len)
         printf("hex dump before modification \n");
         BIO_dump_fp(stdout, s->init_buf->data, s->init_buf->length);
 
-        if (process_client_hello(s)) {
+        if (!process_client_hello(s)) {
             printf("Error while processing Client Hello");
         }
 
