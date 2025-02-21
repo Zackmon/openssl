@@ -1392,6 +1392,7 @@ int process_client_hello(SSL *s) {
      */
     size_t removed_total = 0;
     size_t ext_pos = 0;
+    printf("starting to read extension");
     while (ext_pos + 4 <= exts_len) {
         uint16_t ext_type = (exts[ext_pos] << 8) | exts[ext_pos + 1];
         uint16_t ext_data_len = (exts[ext_pos + 2] << 8) | exts[ext_pos + 3];
