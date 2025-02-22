@@ -1,0 +1,26 @@
+struct tlsClientHelloPacket {
+    u8 handShakeType;
+    be u24 lengthOfClientHello;
+    u16 clientVersion;
+    char clientRandom[32];
+    u8 sessionID;
+    char sessionIdString[sessionID];
+    be u16 cipherSuiteLenght;
+    char cipherList[cipherSuiteLenght];
+    u16 compressionMode;
+    be u16 extensionLength;
+    char extensionList[extensionLength];
+};
+
+struct tlsHandShakePacket {
+   u8 type;
+   u8 tls_major_version;
+   u8 tls_minor_version;
+   be u16 packetLenght;
+   //char packet[packetLenght];
+   tlsClientHelloPacket clientHelloPacket;
+};
+
+
+//tlsHandShakePacket tlshandshakepacket_at_0x00 @ 0x00;
+tlsClientHelloPacket tls_client_hello_packet @ 0x00;
