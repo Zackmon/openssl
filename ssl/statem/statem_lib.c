@@ -1289,11 +1289,11 @@ int process_client_hello(SSL *s) {
     }
 
     size_t orig_len = init_buf->length;
-    char *orig_data = init_buf->data;
+    unsigned char *orig_data = init_buf->data;
 
     /* Allocate a new buffer that is as big as the original.
        (The modified message will be smaller if we remove an extension.) */
-        char *new_data = OPENSSL_malloc(init_buf->max);
+        unsigned char *new_data = OPENSSL_malloc(s->init_buf->max);
     if (new_data == NULL) {
         /* Allocation error */
         return 0;
@@ -1372,7 +1372,9 @@ int process_client_hello(SSL *s) {
         OPENSSL_free(new_data);
         return 1;
     }
-    uint16_t exts_total_len = (new_data[pos] << 8) | new_data[pos + 1];
+    unsigned char firstByte = new_data[pos];
+    unsigned char secondByte = new_data[pos + 1];
+    uint16_t exts_total_len = (firstByte << 8) | secondByte;
     pos += 2;
     if (pos + exts_total_len > orig_len) {
         OPENSSL_free(new_data);
@@ -1392,7 +1394,7 @@ int process_client_hello(SSL *s) {
      */
     size_t removed_total = 0;
     size_t ext_pos = 0;
-    printf("starting to read extension");
+    printf("starting to read extension\n");
     while (ext_pos + 4 <= exts_len) {
         uint16_t ext_type = (exts[ext_pos] << 8) | exts[ext_pos + 1];
         uint16_t ext_data_len = (exts[ext_pos + 2] << 8) | exts[ext_pos + 3];
@@ -1454,7 +1456,7 @@ int process_client_hello(SSL *s) {
      * Also update the length (and optionally the max size).
      */
     OPENSSL_free(s->init_buf->data);
-    s->init_buf->data = (char *)new_data;
+    s->init_buf->data = new_data;
     s->init_buf->length = orig_len - removed_total;
     s->init_buf->max = init_buf->max;//orig_len - removed_total; /* Adjust if necessary */
 
